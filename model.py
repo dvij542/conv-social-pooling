@@ -34,30 +34,30 @@ class highwayNet(nn.Module):
         self.input_embedding_size = args['input_embedding_size']
         self.num_lat_classes = args['num_lat_classes']
         self.num_lon_classes = args['num_lon_classes']
-        self.soc_embedding_size = (((args['grid_size'][0]-4)+1)//2)*self.conv_3x1_depth
+        self.soc_embedding_size = (((args['grid_size'][0]-4)+1)//2)*self.conv_3x1_depth  #As due to the model, convolution is take twice with kernel size 3, thus dimension gets reduced by 2*2 = 4, then padding is applied by 1 unit followed by maxpool with dimension (2,1) , thus reducing the value to half 
 
         ## Define network weights
 
         # Input embedding layer
-        self.ip_emb = torch.nn.Linear(2,self.input_embedding_size)
-
+        self.ip_emb = torch.nn.Linear(2,self.input_embedding_size) # From iitial input of x ad y to 64 inputs dont know why
+                                                    #(2,32)
         # Encoder LSTM
-        self.enc_lstm = torch.nn.LSTM(self.input_embedding_size,self.encoder_size,1)
+        self.enc_lstm = torch.nn.LSTM(self.input_embedding_size,self.encoder_size,1) # For other vehicles (32,64)
 
         # Vehicle dynamics embedding
-        self.dyn_emb = torch.nn.Linear(self.encoder_size,self.dyn_embedding_size)
+        self.dyn_emb = torch.nn.Linear(self.encoder_size,self.dyn_embedding_size)   #(64,32)
 
         # Convolutional social pooling layer and social embedding layer
         self.soc_conv = torch.nn.Conv2d(self.encoder_size,self.soc_conv_depth,3)
         self.conv_3x1 = torch.nn.Conv2d(self.soc_conv_depth, self.conv_3x1_depth, (3,1))
-        self.soc_maxpool = torch.nn.MaxPool2d((2,1),padding = (1,0))
+        self.soc_maxpool = torch.nn.MaxPool2d((2,1),padding = (1,0)) # 9+padding(1) ->/2 = 5
 
         # FC social pooling layer (for comparison):
         # self.soc_fc = torch.nn.Linear(self.soc_conv_depth * self.grid_size[0] * self.grid_size[1], (((args['grid_size'][0]-4)+1)//2)*self.conv_3x1_depth)
 
         # Decoder LSTM
         if self.use_maneuvers:
-            self.dec_lstm = torch.nn.LSTM(self.soc_embedding_size + self.dyn_embedding_size + self.num_lat_classes + self.num_lon_classes, self.decoder_size)
+            self.dec_lstm = torch.nn.LSTM(self.soc_embedding_size + self.dyn_embedding_size + self.num_lat_classes + self.num_lon_classes, self.decoder_size)  # Individual input parameter size is the first parameter and not the size of the list
         else:
             self.dec_lstm = torch.nn.LSTM(self.soc_embedding_size + self.dyn_embedding_size, self.decoder_size)
 
@@ -86,11 +86,11 @@ class highwayNet(nn.Module):
         ## Masked scatter
         soc_enc = torch.zeros_like(masks).float()
         soc_enc = soc_enc.masked_scatter_(masks, nbrs_enc)
-        soc_enc = soc_enc.permute(0,3,2,1)
+        soc_enc = soc_enc.permute(0,3,2,1)   # (0,0) : no of history frames, (2,2) : 13(no of column cells of the road), (1,3) : 3(no of lanes), (3,1) : no of encoded layers on which squeezing or fully conected layer works   
 
         ## Apply convolutional social pooling:
         soc_enc = self.soc_maxpool(self.leaky_relu(self.conv_3x1(self.leaky_relu(self.soc_conv(soc_enc)))))
-        soc_enc = soc_enc.view(-1,self.soc_embedding_size)
+        soc_enc = soc_enc.view(-1,self.soc_embedding_size) #Last vala parameter hatt jayega aur no of parameters for other cars = 5 * 16
 
         ## Apply fc soc pooling
         # soc_enc = soc_enc.contiguous()
@@ -98,7 +98,7 @@ class highwayNet(nn.Module):
         # soc_enc = self.leaky_relu(self.soc_fc(soc_enc))
 
         ## Concatenate encodings:
-        enc = torch.cat((soc_enc,hist_enc),1)
+        enc = torch.cat((soc_enc,hist_enc),1) # No of parameters = 80 + 32 = 112
 
 
         if self.use_maneuvers:
@@ -108,9 +108,9 @@ class highwayNet(nn.Module):
 
             if self.train_flag:
                 ## Concatenate maneuver encoding of the true maneuver
-                enc = torch.cat((enc, lat_enc, lon_enc), 1)
-                fut_pred = self.decode(enc)
-                return fut_pred, lat_pred, lon_pred
+                enc = torch.cat((enc, lat_enc, lon_enc), 1) # No of parameters = 112 + 3 + 2 = 117
+                fut_pred = self.decode(enc) # No of decoded parameters = 5 for each state (mean x, mean y, variance x, variance y, something unknown)
+                return fut_pred, lat_pred, lon_pred # (vector of future states, lat_pred, long_pred)
             else:
                 fut_pred = []
                 ## Predict trajectory distributions for each maneuver class
@@ -124,7 +124,7 @@ class highwayNet(nn.Module):
                         fut_pred.append(self.decode(enc_tmp))
                 return fut_pred, lat_pred, lon_pred
         else:
-            fut_pred = self.decode(enc)
+            fut_pred = self.decode(enc) # kuch bakchodi nahi krni manuever states ki. maneuver states ,tumhari maa ki choo
             return fut_pred
 
 
@@ -136,6 +136,9 @@ class highwayNet(nn.Module):
         fut_pred = fut_pred.permute(1, 0, 2)
         fut_pred = outputActivation(fut_pred)
         return fut_pred
+
+
+
 
 
 
